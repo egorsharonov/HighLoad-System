@@ -14,8 +14,8 @@
 **Местоположение:** Европейские страны, в первую очередь Германия.
 
 **Размер аудитории и нагрузка:**
-idealo указывает **~78 млн посещений в месяц** и **~50 000 магазинов** для Германии — это **≈2.6 млн посещений в день**.
-В материалах партнёров/кейсов также встречаются оценки **~72 млн пользователей в месяц** и «миллионы визитов в день», а также пиковые режимы уровня сотен тысяч запросов в секунду.
+idealo указывает **~78 млн посещений в месяц[1]** и **~50 000 магазинов[2]** для Германии — это **≈2.6 млн посещений в день**.
+В материалах партнёров/кейсов также встречаются оценки **~72 млн пользователей в месяц[3]** и «миллионы визитов в день», а также пиковые режимы уровня сотен тысяч запросов в секунду.
 
 ### 1.4 MVP-функционал
 1. **Поиск и каталог товаров:** строка поиска, базовые фильтры и сортировки.
@@ -28,7 +28,7 @@ idealo указывает **~78 млн посещений в месяц** и **~
 ---
 
 ## Источники
-1. idealo — “Über idealo” (ключевые цифры по посещениям/магазинам/предложениям): https://www.idealo.de/unternehmen/ueber-idealo  
-2. idealo Partner — “Retail Media” (оценка десятков миллионов посещений/месяц): https://partner.idealo.com/uk/retail-media-uk  
-3. AWS Partner Success Story (оценки 72M users/month, миллионы визитов/день, пики QPS): https://aws.amazon.com/partners/success/idealo-mongodb/  
-4. Aiven case study (76M visits/month в Германии, 500M offers, 50k shops, Kafka-инфраструктура): https://aiven.io/case-studies/aiven-supports-idealo
+1. idealo — “Über idealo”: https://www.idealo.de/unternehmen/ueber-idealo  
+2. idealo Partner — “Retail Media”: https://partner.idealo.com/uk/retail-media-uk  
+3. AWS Partner Success Story: https://aws.amazon.com/partners/success/idealo-mongodb/  
+4. Aiven case study: https://aiven.io/case-studies/aiven-supports-idealo
