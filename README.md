@@ -390,43 +390,26 @@ Anycast широко используется CDN-провайдерами: од
 Упрощённая схема локальной балансировки:
 
 ```mermaid
+flowchart LR
+    U[Пользователь / партнёр] --> GSLB[Global DNS / GSLB]
+
+    GSLB --> FRA[Frankfurt DC]
+    GSLB --> DUB[Dublin DC]
+
+    FRA --> FRA_IN[Локальная балансировка FRA]
+    DUB --> DUB_IN[Локальная балансировка DUB]
+```
+
+```mermaid
 flowchart TD
-    GSLB[Global DNS / GSLB]
-    U[Пользователь / партнёр]
-    U --> GSLB
+    VIP[Edge L4 VIP<br/>N+1]
 
-    GSLB --> FRA
-    GSLB --> DUB
+    VIP --> PUB[Public L7 pool<br/>www / api / search]
+    VIP --> ING[Ingestion L7 pool<br/>merchant / events]
 
-    subgraph FRA[Frankfurt DC]
-        FRA_L4[Edge L4 VIP pair\nN+1]
-        FRA_WEB[L7 public pool\nwww/api/search]
-        FRA_MER[L7 ingestion pool\nmerchant/events]
-        FRA_INT[Internal service LB / service discovery]
-        FRA_APP[Web/API/Search services]
-        FRA_ING[Feed normalizer / offer ingestion]
-        FRA_STORE[Offer store / caches / queues]
-
-        FRA_L4 --> FRA_WEB
-        FRA_L4 --> FRA_MER
-        FRA_WEB --> FRA_INT --> FRA_APP
-        FRA_MER --> FRA_INT --> FRA_ING --> FRA_STORE
-    end
-
-    subgraph DUB[Dublin DC]
-        DUB_L4[Edge L4 VIP pair\nN+1]
-        DUB_WEB[L7 public pool\nwww/api/search]
-        DUB_MER[L7 ingestion pool\nmerchant/events]
-        DUB_INT[Internal service LB / service discovery]
-        DUB_APP[Web/API/Search services]
-        DUB_ING[Feed normalizer / offer ingestion]
-        DUB_STORE[Offer store / caches / queues]
-
-        DUB_L4 --> DUB_WEB
-        DUB_L4 --> DUB_MER
-        DUB_WEB --> DUB_INT --> DUB_APP
-        DUB_MER --> DUB_INT --> DUB_ING --> DUB_STORE
-    end
+    PUB --> APP[Web / API / Search services]
+    ING --> NORM[Feed normalizer / ingestion]
+    NORM --> STORE[Offer store / queues / caches]
 ```
 
 ### 4.2 Выбор схемы резервирования
