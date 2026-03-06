@@ -21,10 +21,19 @@ PriceCompare — веб‑сервис сравнения цен по модел
   - [3.1 Функциональное разбиение по доменам](#31-функциональное-разбиение-по-доменам)
   - [3.2 Обоснование расположения ДЦ](#32-обоснование-расположения-дц)
   - [3.3 Распределение запросов по ДЦ](#33-распределение-запросов-по-дц)
-  - [3.4 DNS‑балансировка](#34-dnsбалансировка)
-  - [3.5 Anycast‑балансировка](#35-anycastбалансировка)
+  - [3.4 DNS‑балансировка](#34-dns-балансировка)
+  - [3.5 Anycast‑балансировка](#35-anycast-балансировка)
   - [3.6 Механизм регулировки трафика между ДЦ](#36-механизм-регулировки-трафика-между-дц)
-- [4. Источники](#4-источники)
+- [4. Локальная балансировка нагрузки](#4-локальная-балансировка-нагрузки)
+  - [4.1 Схема локальной балансировки и резервирования](#41-схема-локальной-балансировки-и-резервирования)
+  - [4.2 Выбор схемы резервирования](#42-выбор-схемы-резервирования)
+  - [4.3 Производительность одного балансировщика](#43-производительность-одного-балансировщика)
+  - [4.4 Формула расчёта количества балансировщиков](#44-формула-расчёта-количества-балансировщиков)
+  - [4.5 Расчёт по пулам](#45-расчёт-по-пулам)
+  - [4.6 Локальные edge L4 балансировщики](#46-локальные-edge-l4-балансировщики)
+  - [4.7 Сводная таблица по количеству балансировщиков](#47-сводная-таблица-по-количеству-балансировщиков)
+  - [4.8 Вывод](#48-вывод)
+- [5. Источники](#5-источники)
 
 ## 1. Тема и целевая аудитория
 
@@ -289,10 +298,24 @@ Failover:
 
 CDN-трафик (`static/img`) распределяется по edge автоматически.
 
-### 3.4 DNS-балансировка (GSLB)
+### 3.4 DNS-балансировка
 
 DNS используется как механизм глобальной балансировки между датацентрами для динамических доменов (`www/api/search/events/merchant`) и как механизм «вывода» статических доменов на CDN (`static/img`).
 
+#### Выбор geo-based vs latency-based
+
+Geo-based (geolocation routing) закрепляет страны за датацентрами и даёт предсказуемое и управляемое распределение трафика; этот подход подходит для локализации и сценариев, где важно консистентно маршрутизировать пользователей по регионам, также требуется default-запись на случай нераспознанной геолокации [15].
+
+Latency-based routing выбирает AWS-регион с минимальной задержкой для пользователя [11], но точность гео/latency решений зависит от DNS-резолвера: без EDNS Client Subnet Route 53 ориентируется на IP резолвера, а не клиента [16].
+
+Выбор для PriceCompare: используем geo-based (geolocation) как основной механизм маршрутизации для `www/api/search`, так как сервис работает в фиксированном наборе стран, и важно предсказуемо закреплять трафик по рынкам. Для тонкой настройки долей и плавных переключений используем weighted routing [17].
+
+Пример базовой гео-схемы для `www/api/search`:
+* DE, AT, IT → Frankfurt (primary)
+* UK, FR, ES → Dublin (secondary)
+* Default → Frankfurt
+
+Политики и типы записей
 **Политики маршрутизации:**
 - **Latency-based routing** для направления пользователя в регион с меньшей задержкой [11].
 - **Health checks + failover** для автоматического переключения при недоступности региона [12].
@@ -314,6 +337,11 @@ DNS используется как механизм глобальной бал
 
 Для `api` Anycast в MVP не обязателен; опционально можно использовать AWS Global Accelerator (anycast IP на edge сети), чтобы дополнительно стабилизировать задержку и ускорить failover на уровне сетевого входа [14].
 
+**Выбор областей применимости Anycast**
+Anycast широко используется CDN-провайдерами: один IP объявляется из многих точек присутствия, и пользователь попадает на ближайший edge-узел, что снижает задержку и повышает устойчивость к всплескам нагрузки и DDoS [13].
+
+Для API anycast обычно реализуют через AWS Global Accelerator: он предоставляет статические anycast IP и заводит трафик в глобальную сеть AWS на ближайшем edge, что может снизить задержку [18][14]. В MVP для `api` выбран DNS-based GSLB, потому что требуется предсказуемая привязка по странам (geolocation) [15] и управляемое изменение долей трафика (weighted routing) для деградации/восстановления [17], а отказоустойчивость обеспечивается health-check/failover логикой Route 53 [12].
+
 ### 3.6 Механизм регулировки трафика между ДЦ
 
 Регулировка трафика выполняется на уровне DNS:
@@ -326,7 +354,260 @@ DNS используется как механизм глобальной бал
 - авария: 0/100
 - восстановление: 20/80 → 40/60 → 60/40
 
-## 4. Источники
+## 4. Локальная балансировка нагрузки
+
+### 4.1 Схема локальной балансировки и резервирования
+
+Локальная балансировка строится отдельно внутри каждого ДЦ. После выбора региона на уровне GSLB трафик попадает в локальный контур балансировки выбранного датацентра.
+
+Выделяются три уровня:
+
+1. **Edge L4 VIP** — точка входа в ДЦ.
+   - принимает внешний трафик на `443/tcp`;
+   - выполняет локальное распределение на пул L7-балансировщиков;
+   - резервируется по схеме **N+1**.
+
+2. **L7-балансировщики публичного трафика** — обслуживают:
+   - `www.pricecompare.example`
+   - `api.pricecompare.example`
+   - `search.pricecompare.example`
+
+   На этом уровне выполняются:
+   - SSL termination;
+   - HTTP routing;
+   - health checks upstream-контуров;
+   - распределение запросов по backend-сервисам.
+
+3. **L7-балансировщики ingestion-контура** — обслуживают:
+   - `merchant.pricecompare.example`
+   - при необходимости отдельный write-контур для `events.pricecompare.example`
+
+   На этом уровне выполняются:
+   - SSL termination для B2B-трафика;
+   - приём и маршрутизация обновлений офферов;
+   - изоляция ingestion-нагрузки от пользовательского контура.
+
+Упрощённая схема локальной балансировки:
+
+```mermaid
+flowchart TD
+    GSLB[Global DNS / GSLB]
+    U[Пользователь / партнёр]
+    U --> GSLB
+
+    GSLB --> FRA
+    GSLB --> DUB
+
+    subgraph FRA[Frankfurt DC]
+        FRA_L4[Edge L4 VIP pair\nN+1]
+        FRA_WEB[L7 public pool\nwww/api/search]
+        FRA_MER[L7 ingestion pool\nmerchant/events]
+        FRA_INT[Internal service LB / service discovery]
+        FRA_APP[Web/API/Search services]
+        FRA_ING[Feed normalizer / offer ingestion]
+        FRA_STORE[Offer store / caches / queues]
+
+        FRA_L4 --> FRA_WEB
+        FRA_L4 --> FRA_MER
+        FRA_WEB --> FRA_INT --> FRA_APP
+        FRA_MER --> FRA_INT --> FRA_ING --> FRA_STORE
+    end
+
+    subgraph DUB[Dublin DC]
+        DUB_L4[Edge L4 VIP pair\nN+1]
+        DUB_WEB[L7 public pool\nwww/api/search]
+        DUB_MER[L7 ingestion pool\nmerchant/events]
+        DUB_INT[Internal service LB / service discovery]
+        DUB_APP[Web/API/Search services]
+        DUB_ING[Feed normalizer / offer ingestion]
+        DUB_STORE[Offer store / caches / queues]
+
+        DUB_L4 --> DUB_WEB
+        DUB_L4 --> DUB_MER
+        DUB_WEB --> DUB_INT --> DUB_APP
+        DUB_MER --> DUB_INT --> DUB_ING --> DUB_STORE
+    end
+```
+
+### 4.2 Выбор схемы резервирования
+
+Для локальных балансировщиков рассматриваются две стандартные схемы резервирования:
+
+- **2N**:  
+  `Total_2N = 2 * N_active`
+- **N+1**:  
+  `Total_N+1 = N_active + 1`
+
+где:
+- `N_active` — минимальное число активных балансировщиков, необходимое для обслуживания пикового трафика;
+- `Total` — суммарное число экземпляров с резервированием.
+
+Для PriceCompare выбирается **N+1**, потому что:
+- нагрузка горизонтально распределяется по пулу однотипных балансировщиков;
+- требуется переживать отказ одного экземпляра без полной дубликации всего контура;
+- схема 2N для балансировщиков даёт избыточный запас относительно рассчитанной нагрузки.
+
+### 4.3 Производительность одного балансировщика
+
+Для расчёта используются только заданные бенчмарки NGINX.
+
+#### 4.3.1 Данные из источников
+
+**NGINX Ingress Controller (2019)**:
+- HTTPS RPS: до **342 785 req/s**
+- SSL/TLS TPS: до **58 811 conn/s**
+- Throughput: до **8.8 Gbps**
+
+**NGINX web server (2017)**:
+- HTTPS CPS: до **10 274 conn/s** на 24 CPU
+- рост CPS для HTTPS заметно зависит от CPU и выходит на плато около 24 CPU
+
+#### 4.3.2 Консервативные лимиты для расчёта
+
+Для локального sizing принимаются следующие лимиты на **один L7-балансировщик**:
+
+- `RPS_lb = 342 785 req/s`
+- `CPS_lb = 10 274 new HTTPS conn/s`
+- `BW_lb = 8.8 Gbps`
+
+Выбор сделан намеренно консервативно:
+- по **RPS** и **сети** используется ingress-specific тест 2019;
+- по **SSL termination** используется более низкий HTTPS CPS из теста 2017 как безопасная нижняя оценка для TLS-connection-heavy нагрузки.
+
+### 4.4 Формула расчёта количества балансировщиков
+
+Для каждого пула балансировщиков расчёт ведётся по трём ограничениям:
+
+- ограничение по запросам:  
+  `N_rps = ceil(RPS_peak / RPS_lb)`
+- ограничение по новым HTTPS-соединениям:  
+  `N_cps = ceil(CPS_peak / CPS_lb)`
+- ограничение по сети:  
+  `N_bw = ceil(BW_peak / BW_lb)`
+
+Тогда:
+
+- `N_active = max(N_rps, N_cps, N_bw)`
+- `N_total = N_active + 1`  — для схемы **N+1**
+
+### 4.5 Расчёт по пулам
+
+#### 4.5.1 Публичный L7-пул (`www/api/search`)
+
+Пиковая нагрузка по Frankfurt:
+- HTML origin: `700 req/s`
+- API/search/click-out: `247.77 req/s`
+- суммарно: `947.77 req/s`
+
+Пиковая нагрузка по Dublin:
+- HTML origin: `466.67 req/s`
+- API/search/click-out: `165.17 req/s`
+- суммарно: `631.84 req/s`
+
+Для консервативной оценки принимается, что каждый запрос может прийти на новом HTTPS-соединении:
+
+- `CPS_peak_FRA_public = 947.77`
+- `CPS_peak_DUB_public = 631.84`
+
+Ограничение по сети для этого контура не является лимитирующим: даже весь origin-трафик на порядки ниже `8.8 Gbps` на узел.
+
+Расчёт:
+
+**Frankfurt public**
+- `N_rps = ceil(947.77 / 342785) = 1`
+- `N_cps = ceil(947.77 / 10274) = 1`
+- `N_bw = 1`
+- `N_active = 1`
+- `N_total = 2`
+
+**Dublin public**
+- `N_rps = ceil(631.84 / 342785) = 1`
+- `N_cps = ceil(631.84 / 10274) = 1`
+- `N_bw = 1`
+- `N_active = 1`
+- `N_total = 2`
+
+Итог по публичному контуру:
+- **Frankfurt: 2 L7-балансировщика**
+- **Dublin: 2 L7-балансировщика**
+
+#### 4.5.2 Ingestion L7-пул (`merchant/events`)
+
+Из раздела 2:
+- общий ingestion peak: `60 000 updates/s`
+- при распределении 60/40:
+  - Frankfurt: `36 000 updates/s`
+  - Dublin: `24 000 updates/s`
+
+Для worst-case оценки принимается:
+- одно обновление оффера = один входящий HTTPS-запрос;
+- тогда `CPS_peak ≈ updates/s`
+
+Сетевое ограничение:
+- общий ingestion `BW_peak ≈ 0.24 Gbit/s`
+- Frankfurt: `0.24 * 0.6 = 0.144 Gbit/s`
+- Dublin: `0.24 * 0.4 = 0.096 Gbit/s`
+
+Следовательно, сеть не лимитирует пул:  
+`0.144 << 8.8` и `0.096 << 8.8`
+
+Расчёт:
+
+**Frankfurt ingestion**
+- `N_rps = ceil(36000 / 342785) = 1`
+- `N_cps = ceil(36000 / 10274) = 4`
+- `N_bw = ceil(0.144 / 8.8) = 1`
+- `N_active = 4`
+- `N_total = 5`
+
+**Dublin ingestion**
+- `N_rps = ceil(24000 / 342785) = 1`
+- `N_cps = ceil(24000 / 10274) = 3`
+- `N_bw = ceil(0.096 / 8.8) = 1`
+- `N_active = 3`
+- `N_total = 4`
+
+Итог по ingestion-контуру:
+- **Frankfurt: 5 L7-балансировщиков**
+- **Dublin: 4 L7-балансировщика**
+
+### 4.6 Локальные edge L4 балансировщики
+
+Edge L4 уровень не выполняет SSL termination и не является узким местом по CPS для TLS. На этом уровне достаточно:
+
+- `N_active = 1`
+- `N_total = 2` по схеме **N+1**
+
+Итог:
+- **Frankfurt: 2 edge L4**
+- **Dublin: 2 edge L4**
+
+### 4.7 Сводная таблица по количеству балансировщиков
+
+| ДЦ | Контур | Пиковая нагрузка | Лимитирующий фактор | `N_active` | Резервирование | `N_total` |
+|---|---|---:|---|---:|---|---:|
+| Frankfurt | Edge L4 | входной VIP | отказ одного узла | 1 | N+1 | 2 |
+| Frankfurt | Public L7 | 947.77 req/s | резервирование, не производительность | 1 | N+1 | 2 |
+| Frankfurt | Ingestion L7 | 36 000 CPS | SSL termination | 4 | N+1 | 5 |
+| Dublin | Edge L4 | входной VIP | отказ одного узла | 1 | N+1 | 2 |
+| Dublin | Public L7 | 631.84 req/s | резервирование, не производительность | 1 | N+1 | 2 |
+| Dublin | Ingestion L7 | 24 000 CPS | SSL termination | 3 | N+1 | 4 |
+
+### 4.8 Вывод
+
+1. Для **публичного трафика** (`www/api/search`) производительность одного современного L7-балансировщика с большим запасом перекрывает расчётный peak; число экземпляров определяется не пропускной способностью, а требованиями отказоустойчивости. Поэтому достаточно **2 L7-узлов на ДЦ** по схеме **N+1**.
+
+2. Для **ingestion-контура** узким местом становится не сеть, а **SSL termination / CPS**. При консервативном предположении «одно обновление = одно HTTPS-соединение» требуется:
+   - **5 L7-узлов во Frankfurt**
+   - **4 L7-узла в Dublin**
+
+3. Сетевой throughput не является лимитирующим фактором ни для публичного, ни для ingestion-контура; во всех случаях расчёт упирается либо в резервирование, либо в обработку новых TLS-соединений.
+
+4. Выбранная схема локальной балансировки не содержит single point of failure на уровне входа в ДЦ и допускает поэтапное масштабирование:
+   - отдельно публичного контура;
+   - отдельно ingestion-контура.
+
+## 5. Источники
 
 1. AWS Case Study (July 2024): idealo Increases Traffic 6x for Black Friday Using MongoDB Atlas on AWS — https://aws.amazon.com/partners/success/idealo-mongodb/
 2. idealo (Unternehmen): Über idealo (78 млн визитов/мес DE; 96 млн визитов/мес в 5 странах; 606 млн offers; 50k shops) — https://www.idealo.de/unternehmen/ueber-idealo
@@ -342,3 +623,7 @@ DNS используется как механизм глобальной бал
 12. AWS Route 53: Failover records — https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/resource-record-sets-values-failover.html
 13. Cloudflare Learning Center: Anycast network — https://www.cloudflare.com/learning/cdn/glossary/anycast-network/
 14. AWS Global Accelerator docs: anycast static IPs — https://docs.aws.amazon.com/global-accelerator/latest/dg/introduction-components.html
+15. AWS Route 53: Geolocation routing — https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/routing-policy-geo.html
+16. AWS Route 53: How Route 53 uses EDNS0 to estimate the location of a user — https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/routing-policy-edns0.html
+17. AWS Route 53: Weighted routing — https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/routing-policy-weighted.html
+18. AWS Blog: Use AWS Global Accelerator to improve application performance — https://aws.amazon.com/blogs/networking-and-content-delivery/use-aws-global-accelerator-to-improve-application-performance/
