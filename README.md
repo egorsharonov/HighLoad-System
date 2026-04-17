@@ -38,7 +38,7 @@ PriceCompare — веб‑сервис сравнения цен по модел
     - [5.2 Базовые допущения для размеров](#52-базовые-допущения-для-размеров)
     - [5.3 Логическая ER‑схема](#53-логическая-erсхема)
     - [5.4 Операционные data objects: кэши, буферы, object storage](#54-операционные-data-objects-кэши-буферы-object-storage)
-    - [5.5 Таблица описания логических таблиц](#55-таблица-описания-логических-таблиц)
+    - [5.5 Таблица описания логических таблиц](#55-Описание-логических-таблиц)
     - [5.6 Размеры данных и нагрузка на чтение/запись](#56-размеры-данных-и-нагрузка-на-чтениезапись)
     - [5.7 Требования к консистентности](#57-требования-к-консистентности)
     - [5.8 Особенности распределения нагрузки по ключам](#58-особенности-распределения-нагрузки-по-ключам)
@@ -57,7 +57,23 @@ PriceCompare — веб‑сервис сравнения цен по модел
 - [7. Алгоритмы](#7-алгоритмы)
     - [7.1 Сводная таблица алгоритмов](#71-сводная-таблица-алгоритмов)
     - [7.2 Вывод](#72-вывод)
-- [8. Источники](#8-источники)
+- [8. Технологии](#8-технологии)
+    - [8.1 Сводная таблица технологий](#81-сводная-таблица-технологий)
+    - [8.2 Вывод](#82-вывод)
+- [9. Обеспечение надёжности](#9-обеспечение-надёжности)
+    - [9.1 Сводная таблица по компонентам](#91-сводная-таблица-по-компонентам)
+    - [9.2 Вывод](#92-вывод)
+- [10. Схема проекта](#10-схема-проекта)
+    - [10.1 Схема взаимодействия сервисов](#101-схема-взаимодействия-сервисов)
+    - [10.2 Основные потоки данных](#102-основные-потоки-данных)
+    - [10.3 Внешняя и внутренняя балансировка](#103-внешняя-и-внутренняя-балансировка)
+    - [10.4 Вывод](#104-вывод)
+- [11. Список серверов](#11-список-серверов)
+    - [11.1 Принципы sizing и явные допущения](#111-принципы-sizing-и-явные-допущения)
+    - [11.2 Таблица серверных групп](#112-таблица-серверных-групп)
+    - [11.3 Контейнеры и аллокации в Kubernetes](#113-контейнеры-и-аллокации-в-kubernetes)
+    - [11.4 Вывод](#114-вывод)
+- [12. Источники](#12-источники)
 
 ---
 
@@ -676,14 +692,14 @@ Peak ingestion:
 
 ### 4.7 Сводная таблица по количеству балансировщиков
 
-| ДЦ | Контур | Peak нагрузка | Лимитирующий фактор | N_active | Резервирование | N_total |
-|---|---|---:|---|---:|---|---:|
-| Frankfurt | Edge L4 | входной VIP | операционный минимум | 1 | N+1 + floor | 3 |
-| Frankfurt | Public L7 | 789,79 req/s | операционный минимум | 1 | N+1 + floor | 3 |
-| Frankfurt | Ingestion L7 | 36 000 CPS | SSL termination | 4 | N+1 | 5 |
-| Dublin | Edge L4 | входной VIP | операционный минимум | 1 | N+1 + floor | 3 |
-| Dublin | Public L7 | 526,53 req/s | операционный минимум | 1 | N+1 + floor | 3 |
-| Dublin | Ingestion L7 | 24 000 CPS | SSL termination | 3 | N+1 | 4 |
+| ДЦ        | Контур       | Peak нагрузка | Лимитирующий фактор  | N_active | Резервирование | N_total |
+|-----------|--------------|--------------:|----------------------|---------:|----------------|--------:|
+| Frankfurt | Edge L4      |   входной VIP | операционный минимум |        1 | N+1 + floor    |       3 |
+| Frankfurt | Public L7    |  789,79 req/s | операционный минимум |        1 | N+1 + floor    |       3 |
+| Frankfurt | Ingestion L7 |    36 000 CPS | SSL termination      |        4 | N+1            |       5 |
+| Dublin    | Edge L4      |   входной VIP | операционный минимум |        1 | N+1 + floor    |       3 |
+| Dublin    | Public L7    |  526,53 req/s | операционный минимум |        1 | N+1 + floor    |       3 |
+| Dublin    | Ingestion L7 |    24 000 CPS | SSL termination      |        3 | N+1            |       4 |
 
 ### 4.8 Вывод
 
@@ -1231,7 +1247,7 @@ versioning + CRR]
 
 ### 6.5 Денормализация
 
-Часть денормализации уже была выполнена в логической схеме при проектировании отношений. Здесь рассмотрим дополнительные поля для поиска и отображения 
+Часть денормализации уже была выполнена в логической схеме при проектировании отношений. Здесь рассмотрим дополнительные поля для поиска и отображения
 
 1. **`catalog.product_offer_view`** — materialized read model над `offers_raw`.
     - Содержит `min_price`, `offer_count`, `top_offers[]`, `updated_at`.
@@ -1398,7 +1414,306 @@ Redis‑клиент должен быть Sentinel‑aware: Sentinel заним
 
 Именно эти алгоритмы определяют, почему система требует одновременно sharded document store, relational OLTP, search engine, cache layer и message bus.
 
-## 8. Источники
+## 8. Технологии
+
+### 8.1 Сводная таблица технологий
+
+| Технология                        | Область применения                                                                                  | Мотивационная часть                                                                                                                                                                                                                                                         |
+|-----------------------------------|-----------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Go**                            | stateless backend‑сервисы, ingestion workers, API                                                   | Go подходит для сетевых сервисов с высокой конкуренцией запросов: язык изначально проектировался вокруг goroutines и channels, а официальная документация прямо связывает concurrency patterns с высокопроизводительными network services. [47]                             |
+| **Kubernetes**                    | оркестрация stateless‑сервисов, workers, observability stack                                        | Kubernetes даёт стандартный механизм `requests/limits` для CPU/RAM и штатный HPA для горизонтального масштабирования workloads. Это удобно для раздельного масштабирования public и ingestion контуров. [52][53]                                                            |
+| **NGINX**                         | public L7 и ingestion L7 балансировка, reverse proxy, health checks                                 | NGINX штатно используется как HTTP load balancer и reverse proxy; документация описывает load balancing, passive health checks и routing. Это хорошо совпадает с разделением `www/api/search` и `merchant/events`. [14][15][55]                                             |
+| **AWS Route 53**                  | глобальная балансировка между Frankfurt и Dublin                                                    | Route 53 поддерживает geolocation routing, health checks/failover и weighted routing — именно те механизмы, которые уже заложены в раздел 3. [9][10][11]                                                                                                                    |
+| **CDN с Anycast edge**            | доставка статики и изображений                                                                      | Anycast‑CDN снижает задержку до пользователя, разгружает origin и повышает устойчивость heavy‑трафика. Для PriceCompare это критично, так как основной вес страницы уходит в `static` и `img`. [12]                                                                         |
+| **MongoDB Atlas**                 | каталожный high‑write слой (`offers_raw`, `product_offer_view`, `products`, `price_history_series`) | Публичный кейс idealo прямо подтверждает использование MongoDB Atlas в контуре, где достигаются `200 000 queries/s` и `60 000 updates/s`. Документация MongoDB также подробно покрывает shard keys, hashed sharding, read preference и backup/PITR. [1][21][22][24][25][37] |
+| **PostgreSQL**                    | user state и OLTP‑журналы (`user_account`, `wishlist_item`, `price_alert_rule`, `clickout_event`)   | PostgreSQL даёт строгую целостность, declarative partitioning, BRIN/B‑tree индексы, hot standby и PITR. Это естественный выбор для сравнительно небольшого, но более консистентного user state. [26][27][28][29]                                                            |
+| **PgBouncer**                     | connection pooling перед PostgreSQL                                                                 | Transaction pooling позволяет мультиплексировать большое число клиентских соединений на ограниченный пул backend connections и тем самым защищает PostgreSQL от connection explosion. [30]                                                                                  |
+| **OpenSearch**                    | полнотекстовый поиск, facets, сортировки, поисковый read model                                      | OpenSearch по умолчанию использует BM25, поддерживает faceted search, Bulk API и snapshots. Это делает его подходящим именно для `SEARCH_DOCUMENT`, а не для source‑of‑truth каталога. [31][32][33][35]                                                                     |
+| **Kafka**                         | ingestion pipelines и внутренние асинхронные потоки                                                 | Kafka отделяет high‑write ingestion от downstream materialization и даёт понятные delivery semantics. Это важно для `offer_updates.raw`, `offer_updates.normalized`, `search.reindex`, `alerts.outbox`. [36]                                                                |
+| **franz-go**                      | Kafka client в Go‑сервисах                                                                          | `franz-go` — современный pure‑Go Kafka client с поддержкой producer/consumer groups/transactions. Он удобен для единого стека на Go без зависимости от CGO. [54]                                                                                                            |
+| **Redis**                         | hot caches, sessions, alert dedup/cooldown                                                          | Redis подходит для краткоживущего состояния, поддерживает replication и Sentinel, а потеря кэша не означает потерю source‑of‑truth. [41][42]                                                                                                                                |
+| **S3‑совместимое object storage** | хранение изображений и других media objects                                                         | Object storage естественно подходит для бинарных данных большого объёма; versioning и cross‑region replication закрывают сценарии accidental delete и DR. [43][44]                                                                                                          |
+| **Prometheus**                    | сбор инфраструктурных и прикладных метрик                                                           | Prometheus — time-series monitoring and alerting toolkit. Он хорошо интегрируется с Kubernetes и подходит для SLA/SLO‑метрик, сервисных latency/error-rate и системных метрик. [48]                                                                                         |
+| **Alertmanager**                  | маршрутизация, grouping и deduplication алертов                                                     | Alertmanager умеет dedup, grouping, routing, silences и inhibition. Это особенно важно, потому что для PriceCompare уже на уровне section 4 введён minimum floor на количество балансировщиков именно из эксплуатационных соображений. [49]                                 |
+| **Grafana**                       | dashboards и визуализация telemetry                                                                 | Grafana позволяет визуализировать и исследовать metrics/logs/traces на единой панели; это удобно для эксплуатационного контура и capacity planning. [50]                                                                                                                    |
+| **OpenTelemetry**                 | единая инструментализация traces / metrics / logs                                                   | OTel даёт vendor‑neutral telemetry framework и позволяет коррелировать traces, metrics и logs через общий контекст. Для распределённого ingestion/read path это особенно полезно. [51]                                                                                      |
+
+### 8.2 Вывод
+
+Технологический стек PriceCompare строится вокруг принципа **polyglot + layered architecture**:
+
+- внешний трафик и глобальная маршрутизация обслуживаются `Route 53 + CDN + NGINX`;
+- stateless compute живёт в Kubernetes;
+- high‑write каталог хранится в MongoDB Atlas;
+- user state и append‑only operational logs хранятся в PostgreSQL;
+- поиск выделен в OpenSearch;
+- асинхронные потоки идут через Kafka;
+- ускоряющие и временные данные живут в Redis;
+- media objects вынесены в S3‑совместимое хранилище;
+- наблюдаемость обеспечивают Prometheus, Alertmanager, Grafana и OpenTelemetry.
+
+Такой набор технологий напрямую следует из разделов 2, 5, 6 и 7: разные части нагрузки принципиально различаются по профилю чтения/записи, требованиям к консистентности и способу масштабирования.
+
+## 9. Обеспечение надёжности
+
+### 9.1 Сводная таблица по компонентам
+
+| Компонент                         | Способ резервирования                                                      | Что происходит при отказе                                                                                                   | Комментарий                                                                                               |
+|-----------------------------------|----------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------|
+| **Route 53 / GSLB**               | geolocation routing + health checks + weighted failover                    | регион исключается из ответов DNS, трафик уходит в второй ДЦ                                                                | внешний уровень отказоустойчивости уже заложен в разделе 3. [9][10][11]                                   |
+| **CDN / Anycast edge**            | распределённые edge‑узлы, origin offload                                   | пользователи продолжают получать статику с ближайших edge‑узлов; деградация ограничивается cache miss / origin reachability | heavy‑трафик намеренно вынесен из origin plane. [12]                                                      |
+| **Edge L4**                       | минимум 3 узла на регион                                                   | при отказе одного узла остаётся как минимум два активных ingress‑узла                                                       | operational floor введён в разделе 4.                                                                     |
+| **Public L7**                     | минимум 3 NGINX‑узла на регион + passive health checks                     | один узел можно потерять или вывести в drain без потери контура                                                             | public plane резервируется не по throughput, а по эксплуатационной устойчивости. [14][15][55]             |
+| **Ingestion L7**                  | 5 узлов Frankfurt / 4 узла Dublin                                          | write‑контур выдерживает отказ одного узла и rolling updates                                                                | отдельный пул изолирует merchant‑traffic от пользовательского API.                                        |
+| **Kubernetes приложения**         | `>=3` replicas на public plane, anti‑affinity, HPA, rolling updates        | отказ pod/node не приводит к потере сервиса; HPA добавляет capacity при росте нагрузки                                      | requests/limits и HPA — штатные механизмы Kubernetes. [52][53]                                            |
+| **Kafka**                         | replication factor `3`, consumer groups, idempotent producers              | потеря одного broker не останавливает pipeline; consumers перераспределяются                                                | Kafka отделяет ingestion от materialization и снижает blast radius write‑контура. [36]                    |
+| **MongoDB Atlas**                 | sharded cluster, replica set `3` на shard, continuous backup + PIT restore | отказ одного data-bearing node внутри replica set переживается без потери кластера                                          | основной source‑of‑truth каталога. [21][22][25]                                                           |
+| **PostgreSQL**                    | `1 primary + 2 hot standby`, WAL archiving, PITR                           | OLTP переживает отказ standby; при отказе primary выполняется promotion standby                                             | user state и operational logs требуют более строгой консистентности. [27][29]                             |
+| **OpenSearch**                    | `2 primaries + 1 replica`, snapshots                                       | отказ одного data node не делает индекс недоступным, если replica актуальна                                                 | search read model восстанавливается из snapshots и reindex pipeline. [35]                                 |
+| **Redis**                         | primary + replica + Sentinel                                               | при отказе primary Sentinel выбирает новый primary                                                                          | Redis не является source‑of‑truth, поэтому допустима деградация только по latency/кэш‑hit ratio. [41][42] |
+| **S3‑совместимое object storage** | versioning + cross‑region replication                                      | accidental delete/overwrite перекрывается versioning, региональный отказ — репликой                                         | media plane резервируется отдельно от compute/data plane. [43][44]                                        |
+| **Prometheus**                    | HA‑пара экземпляров по регионам, federation/remote_write при необходимости | отказ одного Prometheus не оставляет систему полностью «слепой»                                                             | сами метрики — не source‑of‑truth бизнеса, но критичны для SRE. [48]                                      |
+| **Alertmanager**                  | минимум 2 экземпляра, grouping и deduplication                             | потеря одного экземпляра не ломает весь alert routing                                                                       | dedup/grouping уменьшают alert storm и noise. [49]                                                        |
+| **Grafana**                       | минимум 2 реплики за L7 или 1 active + backup manifest                     | отказ одной реплики не останавливает доступ к дашбордам                                                                     | не критичный write‑компонент, но важен для эксплуатации. [50]                                             |
+| **OpenTelemetry Collector**       | минимум 2 экземпляра на регион                                             | отказ одного collector не должен остановить весь telemetry pipeline                                                         | telemetry plane должен быть избыточным, чтобы не слепнуть при локальном сбое. [51]                        |
+
+### 9.2 Вывод
+
+Надёжность PriceCompare обеспечивается не одной «магической» технологией, а наложением нескольких слоёв резервирования:
+
+1. **межрегиональный уровень** — Route 53 и CDN;
+2. **региональный ingress уровень** — Edge L4 и отдельные public/ingestion L7 пулы;
+3. **уровень приложений** — многорепличные stateless deployments в Kubernetes;
+4. **уровень данных** — replica sets, standby replicas, snapshots, PITR и cross‑region replication;
+5. **уровень эксплуатации** — Prometheus, Alertmanager, Grafana, OTel.
+
+Такой подход уменьшает blast radius отказов: сбой одного узла, одного pod или даже части сервиса не должен превращаться в потерю всего продукта.
+
+## 10. Схема проекта
+
+### 10.1 Схема взаимодействия сервисов
+
+```mermaid
+flowchart LR
+    U[Пользователь] --> DNS[Route 53<br/>geolocation + health checks + weighted failover]
+    M[Merchant / Partner API] --> DNS
+
+    DNS --> FRA_E[Frankfurt Edge L4]
+    DNS --> DUB_E[Dublin Edge L4]
+
+    U --> CDN[CDN / Anycast edge<br/>static + img]
+    CDN --> S3[(S3-compatible object storage)]
+
+    FRA_E --> FRA_PUB[Frankfurt Public L7<br/>www / api / search]
+    FRA_E --> FRA_ING[Frankfurt Ingestion L7<br/>merchant / events]
+
+    DUB_E --> DUB_PUB[Dublin Public L7<br/>www / api / search]
+    DUB_E --> DUB_ING[Dublin Ingestion L7<br/>merchant / events]
+
+    FRA_PUB --> WEB[Web / BFF]
+    FRA_PUB --> CAPI[Catalog API]
+    FRA_PUB --> SAPI[Search API]
+    FRA_PUB --> UAPI[User-State API]
+    FRA_PUB --> CLK[Click-out API]
+
+    DUB_PUB --> WEB
+    DUB_PUB --> CAPI
+    DUB_PUB --> SAPI
+    DUB_PUB --> UAPI
+    DUB_PUB --> CLK
+
+    FRA_ING --> IAPI[Ingestion API]
+    DUB_ING --> IAPI
+
+    IAPI --> K1[(Kafka offer_updates.raw)]
+    K1 --> NORM[Normalizer / Matcher]
+    NORM --> MDB[(MongoDB Atlas<br/>products / offers_raw / product_offer_view / price_history)]
+    NORM --> K2[(Kafka offer_updates.normalized)]
+
+    K2 --> PROJ[Product Offer View Projector]
+    PROJ --> MDB
+
+    K2 --> IDX[Search Indexer]
+    IDX --> OS[(OpenSearch products_search_v1)]
+
+    WEB --> R[(Redis cache/session/dedup)]
+    CAPI --> R
+    SAPI --> R
+    UAPI --> PG[(PostgreSQL<br/>user_account / wishlist / alerts / clickout)]
+    CLK --> PG
+    UAPI --> PG
+    CAPI --> MDB
+    SAPI --> OS
+
+    MDB --> S3
+    PG --> K3[(Kafka alerts.outbox)]
+    K3 --> NOTIF[Notifier]
+    NOTIF --> EMAIL[Email / Push / other channels]
+
+    WEB --> OTEL[OpenTelemetry Collector]
+    CAPI --> OTEL
+    SAPI --> OTEL
+    UAPI --> OTEL
+    IAPI --> OTEL
+    NORM --> OTEL
+    IDX --> OTEL
+
+    OTEL --> PROM[Prometheus]
+    OTEL --> GRAF[Grafana]
+    PROM --> AM[Alertmanager]
+```
+
+### 10.2 Основные потоки данных
+
+1. **Пользовательский read path**  
+   Пользователь приходит через `Route 53` в Frankfurt или Dublin.  
+   Статика и изображения идут через `CDN`, а динамический трафик попадает в `Public L7` и дальше в `Web / Catalog API / Search API / User-State API`.  
+   Каталожные данные читаются из `MongoDB`, поиск — из `OpenSearch`, горячие ответы — из `Redis`.
+
+2. **User-state write path**  
+   Операции `wishlist`, `price alerts`, часть `click-out metadata` идут через `User-State API` и записываются в `PostgreSQL`, чтобы сохранить `read-after-write` и ограничения целостности.
+
+3. **Click-out analytics path**  
+   При переходе в магазин `Click-out API` записывает append‑only событие в `PostgreSQL`. Дальше downstream‑аналитика может читать события по времени, сессии и merchant.
+
+4. **Merchant ingestion path**  
+   Merchant отправляет feed/API‑обновления в `Ingestion L7` -> `Ingestion API` -> `Kafka offer_updates.raw`.  
+   Дальше `Normalizer / Matcher` делает canonical matching, идемпотентные upsert‑операции и пишет в `MongoDB`.
+
+5. **Materialization path**  
+   После нормализации события уходят в `offer_updates.normalized`, откуда:
+    - `Product Offer View Projector` обновляет `product_offer_view` и другие read models в MongoDB;
+    - `Search Indexer` пакетно обновляет `OpenSearch`;
+    - price‑related changes могут триггерить `alerts.outbox` и дальнейший notifier pipeline.
+
+### 10.3 Внешняя и внутренняя балансировка
+
+**Внешняя балансировка**
+- `Route 53` выбирает регион по `geolocation routing`;
+- при деградации/отказе региона используются `health checks + failover`;
+- для плавного перераспределения применяется `weighted routing`;
+- `static` и `img` обслуживаются через CDN с anycast‑маршрутизацией. [9][10][11][12]
+
+**Внутренняя балансировка**
+- внутри региона `Edge L4` распределяет трафик на `Public L7` и `Ingestion L7`;
+- `NGINX` балансирует HTTP‑запросы между backend‑pods;
+- Kubernetes Services и HPA масштабируют stateless‑компоненты;
+- `PgBouncer` мультиплексирует PostgreSQL‑подключения;
+- `mongos` маршрутизирует запросы по shard key;
+- `Kafka consumer groups` делят event stream между workers. [21][22][30][36][52][53][55]
+
+### 10.4 Вывод
+
+Схема проекта намеренно разделяет:
+
+- **read path** и **write path**;
+- **пользовательский контур** и **merchant ingestion**;
+- **source‑of‑truth** и **derived read models**;
+- **compute plane**, **data plane** и **observability plane**.
+
+Именно это позволяет независимо масштабировать поиск, карточку товара, ingestion, notifications и аналитические потоки.
+
+## 11. Список серверов
+
+### 11.1 Принципы sizing и явные допущения
+
+Для server list используются два разных подхода:
+
+1. **Компоненты, количество которых следует напрямую из предыдущих разделов**
+    - Edge L4, Public L7 и Ingestion L7 берутся из раздела 4;
+    - MongoDB nodes = `8 shards * 3 replica-set members = 24 data-bearing nodes`;
+    - PostgreSQL = `1 primary + 2 standby`;
+    - OpenSearch = `3 data nodes` под схему `2 primary shards + 1 replica`;
+    - Kafka = `3 brokers`;
+    - Redis = `primary + replica + Sentinel-aware topology` по регионам.
+
+2. **Компоненты, для которых нет публичного per-node benchmark**
+    - Kubernetes node pools и pod requests/limits задаются как явные engineering assumptions;
+    - цель — удерживать steady-state utilisation заметно ниже 100% и сохранять `N+1` по node pools;
+    - размеры pod `requests/limits` опираются на штатную модель Kubernetes ресурсов и HPA. [52][53]
+
+Дополнительные инженерные допущения для ingestion workers:
+
+- один `normalizer-worker` после batching и change detection способен стабильно обрабатывать порядка `3 000 updates/s`;
+- тогда для `60 000 updates/s` total нужны примерно `20` workers;
+- при распределении `60/40` получается:
+    - Frankfurt: `12 workers`
+    - Dublin: `8 workers`
+
+Для downstream materialization принимается coalescing factor `5`:
+- из `60 000 updates/s` в проекционные контуры уходит около `12 000 updates/s`;
+- один `projector/indexer` worker оценивается в `~1 500 events/s`;
+- значит требуется около `8` workers на каждый тип downstream‑обработчика:
+    - Frankfurt: `5`
+    - Dublin: `3`
+
+Эти значения не взяты из внешнего benchmark и прямо помечаются как проектные предположения.
+
+### 11.2 Таблица серверных групп
+
+> Managed сервисы (`Route 53`, CDN, Atlas control plane, S3 control plane) не считаются в количестве user-managed servers. В таблицу ниже включены data-bearing nodes и вычислительные узлы, которые реально нужны для проекта.
+
+| Группа серверов / узлов          | Регион            |            Конфигурация одного узла | Кол-во | Размещённые сервисы / роль                                                                                   |
+|----------------------------------|-------------------|------------------------------------:|-------:|--------------------------------------------------------------------------------------------------------------|
+| Edge L4                          | Frankfurt         |   `2 vCPU / 4 GiB RAM / 20 GB disk` |      3 | внешний TCP/TLS ingress уровня региона                                                                       |
+| Edge L4                          | Dublin            |   `2 vCPU / 4 GiB RAM / 20 GB disk` |      3 | внешний TCP/TLS ingress уровня региона                                                                       |
+| Public L7                        | Frankfurt         |   `4 vCPU / 8 GiB RAM / 50 GB disk` |      3 | `www/api/search`, reverse proxy, health checks                                                               |
+| Public L7                        | Dublin            |   `4 vCPU / 8 GiB RAM / 50 GB disk` |      3 | `www/api/search`, reverse proxy, health checks                                                               |
+| Ingestion L7                     | Frankfurt         |   `4 vCPU / 8 GiB RAM / 50 GB disk` |      5 | `merchant/events`, write‑path termination                                                                    |
+| Ingestion L7                     | Dublin            |   `4 vCPU / 8 GiB RAM / 50 GB disk` |      4 | `merchant/events`, write‑path termination                                                                    |
+| Kubernetes general app pool      | Frankfurt         |  `8 vCPU / 32 GiB RAM / 200 GB SSD` |      3 | Web/BFF, Catalog API, Search API, User-State API, Click-out API                                              |
+| Kubernetes general app pool      | Dublin            |  `8 vCPU / 32 GiB RAM / 200 GB SSD` |      3 | Web/BFF, Catalog API, Search API, User-State API, Click-out API                                              |
+| Kubernetes ingestion worker pool | Frankfurt         | `16 vCPU / 64 GiB RAM / 300 GB SSD` |      3 | Ingestion API, Normalizer, Projectors, Search Indexers                                                       |
+| Kubernetes ingestion worker pool | Dublin            | `16 vCPU / 64 GiB RAM / 300 GB SSD` |      3 | Ingestion API, Normalizer, Projectors, Search Indexers                                                       |
+| Kubernetes observability pool    | Frankfurt         |  `4 vCPU / 16 GiB RAM / 200 GB SSD` |      2 | Prometheus, Alertmanager, Grafana, OTel Collector                                                            |
+| Kubernetes observability pool    | Dublin            |  `4 vCPU / 16 GiB RAM / 200 GB SSD` |      2 | Prometheus, Alertmanager, OTel Collector                                                                     |
+| MongoDB Atlas data-bearing nodes | multi-region      |    `8 vCPU / 32 GiB RAM / 1 TB SSD` |     24 | `offers_raw`, `product_offer_view`, `products`, `price_history_series`, `product_media_meta`, `merchants`    |
+| PostgreSQL cluster nodes         | primary + standby |    `8 vCPU / 32 GiB RAM / 1 TB SSD` |      3 | `user_account`, `wishlist_item`, `price_alert_rule`, `alert_delivery`, `clickout_event`, `merchant_feed_job` |
+| OpenSearch data nodes            | cluster           |  `8 vCPU / 32 GiB RAM / 500 GB SSD` |      3 | `products_search_v1`                                                                                         |
+| Kafka broker nodes               | cluster           |    `8 vCPU / 32 GiB RAM / 1 TB SSD` |      3 | `offer_updates.raw`, `offer_updates.normalized`, `search.reindex`, `alerts.outbox`                           |
+| Redis nodes                      | Frankfurt         |   `2 vCPU / 8 GiB RAM / 100 GB SSD` |      3 | cache/session/dedup, primary+replica+Sentinel topology                                                       |
+| Redis nodes                      | Dublin            |   `2 vCPU / 8 GiB RAM / 100 GB SSD` |      3 | cache/session/dedup, primary+replica+Sentinel topology                                                       |
+
+### 11.3 Контейнеры и аллокации в Kubernetes
+
+| Deployment / workload          | Регион(ы) и replicas | Requests           | Limits         | Комментарий                                                                   |
+|--------------------------------|----------------------|--------------------|----------------|-------------------------------------------------------------------------------|
+| `web-bff`                      | FRA `4`, DUB `3`     | `500m CPU / 512Mi` | `1 CPU / 1Gi`  | minimum `3` replicas для HA, +1 replica во Frankfurt из-за доли `60%` traffic |
+| `catalog-api`                  | FRA `4`, DUB `3`     | `500m / 1Gi`       | `1 CPU / 2Gi`  | карточка товара и offers read path                                            |
+| `search-api`                   | FRA `4`, DUB `3`     | `500m / 1Gi`       | `1 CPU / 2Gi`  | search/facets/sort read path                                                  |
+| `user-state-api`               | FRA `3`, DUB `3`     | `250m / 512Mi`     | `500m / 1Gi`   | wishlist / alerts CRUD                                                        |
+| `clickout-api`                 | FRA `3`, DUB `3`     | `250m / 512Mi`     | `500m / 1Gi`   | фиксация click‑out событий                                                    |
+| `ingestion-api`                | FRA `5`, DUB `4`     | `500m / 512Mi`     | `1 CPU / 1Gi`  | число replicas согласовано с write‑ingress plane                              |
+| `normalizer-worker`            | FRA `12`, DUB `8`    | `1 CPU / 2Gi`      | `2 CPU / 4Gi`  | sizing по допущению `~3 000 updates/s` на worker после batching               |
+| `product-offer-view-projector` | FRA `5`, DUB `3`     | `1 CPU / 2Gi`      | `2 CPU / 4Gi`  | обновляет `product_offer_view` и другие MongoDB read models                   |
+| `search-indexer`               | FRA `5`, DUB `3`     | `1 CPU / 2Gi`      | `2 CPU / 4Gi`  | bulk indexing в OpenSearch                                                    |
+| `alert-matcher`                | FRA `2`, DUB `2`     | `500m / 1Gi`       | `1 CPU / 2Gi`  | low-volume, но держится минимум в двух экземплярах на регион                  |
+| `notifier`                     | FRA `2`, DUB `2`     | `500m / 512Mi`     | `1 CPU / 1Gi`  | отправка email/push/other channels                                            |
+| `otel-collector`               | FRA `2`, DUB `2`     | `250m / 256Mi`     | `500m / 512Mi` | telemetry pipeline на регион                                                  |
+| `prometheus`                   | FRA `2`, DUB `2`     | `2 CPU / 8Gi`      | `4 CPU / 16Gi` | HA‑пара на регион                                                             |
+| `alertmanager`                 | FRA `2`, DUB `2`     | `250m / 512Mi`     | `500m / 1Gi`   | dedup/grouping/routing                                                        |
+| `grafana`                      | FRA `2`, DUB `1`     | `500m / 1Gi`       | `1 CPU / 2Gi`  | основной UI в FRA, backup replica в DUB                                       |
+
+Суммарная проверка по node pools:
+
+- **Frankfurt general app pool**: суммарные `requests` порядка `~10 CPU` и `~16 GiB`, что укладывается в `3 * (8 vCPU / 32 GiB)` с запасом и переживает отказ одного узла.
+- **Dublin general app pool**: суммарные `requests` порядка `~8.5 CPU` и `~14 GiB`, что также укладывается в `3 * (8 vCPU / 32 GiB)`.
+- **Frankfurt ingestion pool**: суммарные `requests` порядка `~24.5 CPU` и `~46.5 GiB`, что укладывается в `3 * (16 vCPU / 64 GiB)` и сохраняет headroom после потери одного узла.
+- **Dublin ingestion pool**: суммарные `requests` порядка `~16 CPU` и `~30 GiB`, что намеренно размещается на `3`, а не на `2` узлах, чтобы не терять `N+1` по worker‑plane.
+
+### 11.4 Вывод
+
+Server list подтверждает, что в проекте действительно есть несколько разных классов инфраструктуры:
+
+1. **Ingress plane** — edge и L7‑балансировщики;
+2. **Stateless compute plane** — Kubernetes node pools под API и workers;
+3. **Data plane** — MongoDB, PostgreSQL, OpenSearch, Kafka, Redis;
+4. **Media/storage plane** — object storage;
+5. **Observability plane** — Prometheus, Alertmanager, Grafana, OTel.
+
+Такое разбиение важно не только для удобства эксплуатации, но и для capacity planning: ingestion worker pool не должен конкурировать за CPU с public API, а observability plane не должен зависеть от случайной свободной ёмкости прикладного кластера.
+
+## 12. Источники
 
 1. AWS Case Study (July 2024): idealo Increases Traffic 6x for Black Friday Using MongoDB Atlas on AWS — https://aws.amazon.com/partners/success/idealo-mongodb/
 2. idealo press release (14.11.2025): 78 млн visits/month в Германии, 606 млн offers, 50k retailers, 6 стран — https://www.idealo.de/dam/jcr:1a1c6ac0-38f1-4188-8aea-4c1034d86139/251114_idealo_Press-Release_Claim-for-Damages.pdf
@@ -1429,8 +1744,8 @@ Redis‑клиент должен быть Sentinel‑aware: Sentinel заним
 27. PostgreSQL Documentation: Continuous Archiving and Point-in-Time Recovery — https://www.postgresql.org/docs/current/continuous-archiving.html
 28. PostgreSQL Documentation: BRIN Indexes — https://www.postgresql.org/docs/current/brin.html
 29. PostgreSQL Documentation: Hot Standby — https://www.postgresql.org/docs/current/hot-standby.html
-30. PgBouncer Documentation: pooling modes / pool_mode — https://www.pgbouncer.org/config.html
-31. OpenSearch Documentation: BM25 is the default scoring algorithm — https://docs.opensearch.org/latest/tutorials/vector-search/neural-search-tutorial/
+30. PgBouncer Documentation: pooling modes / transaction pooling — https://www.pgbouncer.org/features.html
+31. OpenSearch Documentation: Keyword search / BM25 is the default scoring algorithm — https://docs.opensearch.org/latest/search-plugins/keyword-search/
 32. OpenSearch Documentation: Faceted search — https://docs.opensearch.org/latest/tutorials/faceted-search/
 33. OpenSearch Documentation: Bulk API — https://docs.opensearch.org/latest/api-reference/document-apis/bulk/
 34. Amazon OpenSearch Service best practices: choosing the number and size of shards — https://docs.aws.amazon.com/opensearch-service/latest/developerguide/bp-sharding.html
@@ -1444,3 +1759,14 @@ Redis‑клиент должен быть Sentinel‑aware: Sentinel заним
 42. Redis Documentation: Sentinel — https://redis.io/docs/latest/operate/oss_and_stack/management/sentinel/
 43. Amazon S3 Documentation: Versioning — https://docs.aws.amazon.com/AmazonS3/latest/userguide/versioning-workflows.html
 44. Amazon S3 Documentation: Replicating objects within and across Regions — https://docs.aws.amazon.com/AmazonS3/latest/userguide/replication.html
+45. Google Merchant Center Help: About unique product identifiers (GTIN, MPN, brand) — https://support.google.com/merchants/answer/160161?hl=en
+46. Google Merchant Center Help: GTIN [gtin] attribute — https://support.google.com/merchants/answer/6324461?hl=en
+47. Go Documentation: Go Concurrency Patterns — https://go.dev/doc/
+48. Prometheus Documentation: Overview — https://prometheus.io/docs/introduction/overview/
+49. Prometheus Documentation: Alertmanager — https://prometheus.io/docs/alerting/latest/alertmanager/
+50. Grafana Documentation: Grafana fundamentals / dashboards and visualizations — https://grafana.com/docs/grafana/latest/fundamentals/
+51. OpenTelemetry Documentation: vendor-neutral telemetry for traces, metrics and logs — https://opentelemetry.io/docs/
+52. Kubernetes Documentation: Resource Management for Pods and Containers — https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+53. Kubernetes Documentation: Horizontal Pod Autoscaling — https://kubernetes.io/docs/concepts/workloads/autoscaling/horizontal-pod-autoscale/
+54. franz-go (`kgo`) package documentation — https://pkg.go.dev/github.com/twmb/franz-go/pkg/kgo
+55. NGINX Documentation: Using nginx as HTTP load balancer — https://nginx.org/en/docs/http/load_balancing.html
